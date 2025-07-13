@@ -1,0 +1,69 @@
+function [tgrid,q,dq,ddq,tau,e] = simulate_traj(robot,M_sym,C_sym,G_sym,...
+                                         Kp,Kd,Ki,coeffs,tf,N)
+%SIMULATE_TRAJ  Integra a dinâmica com controle PID clássico.
+%   robot   : objeto Robot já parametrizado
+%   M_sym,C_sym,G_sym : expressões dinâmicas (já com parâmetros numéricos)
+%   Kp,Kd,Ki : matrizes de ganho (n×n)
+%   coeffs   : 6×n coeficientes da trajetória de 5ª ordem
+%   tf       : tempo final [s]
+%   N        : nº de passos (>=2)
+%   ---------
+%   Saídas:
+%   tgrid : 1×N vetor de tempo
+%   q,dq,ddq : N×n trajetórias reais simuladas
+%   tau   : N×n torques aplicados
+%   e     : N×n erro de posição (q_d - q)
+
+    n     = robot.dof;
+    tgrid = linspace(0,tf,N);
+    dt    = tgrid(2)-tgrid(1);
+
+    % ------- desired traj precomputed on grid ---------------------
+    [q_d_fun,dq_d_fun,ddq_d_fun] = precompute_traj_funcs(coeffs);
+    q_ds  = q_d_fun(tgrid).';      % N×n
+    dq_ds = dq_d_fun(tgrid).';
+    ddq_ds= ddq_d_fun(tgrid).';
+
+    % ------- matlabFunction for M,C,G ----------------------------
+    syms qsym [n 1] real
+    syms dqsym [n 1] real
+    M_handle = matlabFunction(M_sym,'Vars',{qsym});
+    C_handle = matlabFunction(C_sym,'Vars',{qsym,dqsym});
+    G_handle = matlabFunction(G_sym,'Vars',{qsym});
+
+    % ------- init state ------------------------------------------
+    q   = zeros(N,n);   q(1,:)   = q_ds(1,:);   % start at desired
+    dq  = zeros(N,n);
+    ddq = zeros(N,n);
+    tau = zeros(N,n);
+    e   = zeros(N,n);
+    e_int = zeros(1,n);
+
+    % ------- loop -------------------------------------------------
+    for k = 1:N-1
+        e(k,:)   = q_ds(k,:)  - q(k,:);
+        edot     = dq_ds(k,:) - dq(k,:);
+        e_int    = e_int + e(k,:)*dt;
+
+        M = M_handle(q(k,:).').';            % n×n
+        C = C_handle(q(k,:).',dq(k,:).').';  % n×n
+        G = G_handle(q(k,:).').';           % n×1
+
+        % torque PID clássico
+        tau(k,:) = (Kp*e(k,:).' + Kd*edot.' + Ki*e_int.' + G).';
+        ddq(k+1,:) = (M \ (tau(k,:).' - C*dq(k,:).')).';
+
+        % integração de Euler simples
+        dq(k+1,:) = dq(k,:) + ddq(k+1,:)*dt;
+        q(k+1,:)  = q(k,:)  + dq(k+1,:)*dt;
+    end
+end
+
+%==================================================================
+function [qf,dqf,ddqf] = precompute_traj_funcs(coeffs)
+    syms t real
+    [q_sym,dq_sym,ddq_sym] = calc_traj(coeffs,t);
+    qf   = matlabFunction(q_sym , 'Vars', t);
+    dqf  = matlabFunction(dq_sym, 'Vars', t);
+    ddqf = matlabFunction(ddq_sym,'Vars', t);
+end

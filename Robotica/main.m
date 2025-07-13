@@ -1,0 +1,115 @@
+clc
+clear
+
+%% ---------- DEFINIÇÃO DO ROBÔ EXEMPLO (PRR) ----------
+syms q1 q2 q3 L1 L2 L3 real
+dh = [ 0      L1+q1   0    0   ;
+       q2     0       L2   0   ;
+       q3     0       L3  -pi/2];
+
+% parâmetros simbólicos
+syms m1 m2 m3 I1x I1y I1z I2x I2y I2z I3x I3y I3z cm1 cm2 cm3 g real
+
+m     = [m1; m2; m3];
+Ic1   = diag([I1x I1y I1z]);
+Ic2   = diag([I2x I2y I2z]);
+Ic3   = diag([I3x I3y I3z]);
+r_cis = { [0;0;cm1], [0;cm2;0], [0;cm3;0] };
+inert = {Ic1, Ic2, Ic3};
+
+Cookboat = Robot("PRR", dh, ...
+                 'masses',   m, ...
+                 'r_cis',    r_cis, ...
+                 'inertias', inert);
+
+% -------- (opcional) imprimir matrizes simbólicas -------------
+% disp("Jacobian EE:");          pretty(Cookboat.J)
+% disp("Matriz de inércia M(q):"); pretty(Cookboat.M)
+% disp("Matriz de Coriólis:");     pretty(Cookboat.C)
+% disp("Vetor de gravidade:");     pretty(Cookboat.G)
+
+%% ----------- Substituição de parâmetros numéricos -------------
+
+vals = { ...
+% ---- massas (kg) --------------------------------------------------
+  m1  2.00234
+  m2  5.1245
+  m3  3.45
+% ---- inércias principais (kg·m²) – ajustadas ---------------------
+  I1x 0.00978          
+  I1y 0.04562          
+  I1z 0.04563          
+  I2x 0.385            
+  I2y 0.333            
+  I2z 0.0647           
+  I3x 0.0176           
+  I3y 0.00771          
+  I3z 0.0108           
+% ---- centros de massa (m) – mantidos -----------------------------
+  cm1  0.173415539823909
+  cm2  0.087520147330708
+  cm3  0.097282889122639
+% ---- comprimentos geométricos (m) --------------------------------
+  L1   0.30
+  L2   0.80
+  L3   0.40
+% ---- gravidade ---------------------------------------------------
+  g    9.81 };
+
+
+
+M_num = Cookboat.evalSubs(Cookboat.M, vals);
+C_num = Cookboat.evalSubs(Cookboat.C, vals);
+G_num = Cookboat.evalSubs(Cookboat.G, vals);
+
+% -------- (opcional) mostrar resultados numéricos -------------
+% disp('M(q) numérica:');  pretty(M_num)
+% disp('C(q,qdot) numérica:');  pretty(C_num)
+% disp('G(q) numérica:');  pretty(G_num)
+
+%% ============ GERAÇÃO DA TRAJETÓRIA DESEJADA =================
+tf  = 4;                                   % duração [s]
+q0  = [0;          pi/2;    0   ];         % posições iniciais
+qf  = [pi/2;  3*pi/4;   0.08 ];            % posições finais
+
+coeffs = coeff_traj(q0, qf, tf);           % 6×n matriz de coeficientes
+
+syms t real
+[q_d, dq_d, ddq_d] = calc_traj(coeffs, t); % trajetórias simbólicas n×1
+
+tgrid = linspace(0, tf, 100);
+
+% ----- chamadas dinâmicas -----
+[M_series,C_series,G_series,M_max,C_max] = ...
+        dyn_on_traj(Cookboat, M_num, C_num, G_num, coeffs, tgrid);
+
+%% ---- matrizes que apresentam a maior norma --------------------
+fprintf('‣ Norma(Frobenius) máxima de M: %.4f\n', norm(M_max,'fro'));
+disp('Matriz M que gera essa norma:');  disp(M_max);
+
+fprintf('‣ Norma(Frobenius) máxima de C: %.4f\n', norm(C_max,'fro'));
+disp('Matriz C que gera essa norma:');  disp(C_max);
+
+
+%% -------- escolha do controlador ---------------------------------
+pid  = 'classico';   % 'classico'  ou  'tc'
+ts   = 0.75;         % settling time (3 %)  [s]
+zeta = 0.7;         % razão de amortecimento (≈15 % overshoot)
+
+[Kp,Kd,Ki,wn,p] = control_gain(pid,zeta,ts,M_max,C_max);
+
+% opcional: visualizar
+disp(Kp); disp(Kd); disp(Ki);
+
+%% --------- simulação da trajetória real ---------------------------
+N = 200;            % pontos de integração
+[tgrid_real,q,dq,ddq,tau,e,q_ds,dq_ds,ddq_ds] = ...
+        simulate_traj(Cookboat,M_num,C_num,G_num,...
+                      Kp,Kd,Ki,coeffs,tf,200);
+
+plot_results(tgrid_real, q, dq, ddq, q_ds, dq_ds, ddq_ds, e, tau);
+
+
+
+
+

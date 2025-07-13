@@ -1,0 +1,54 @@
+function plot_results(t,q,dq,ddq,qd,dqd,ddqd,e,tau)
+%PLOT_RESULTS  Gera figuras padrão da simulação: posições, velocidades,
+%acelerações, erro e torques.
+%   t   : 1×N vetor de tempo
+%   q   : N×n posições simuladas
+%   dq  : N×n velocidades
+%   ddq : N×n acelerações
+%   qd,dqd,ddqd : N×n trajetórias de referência
+%   e   : N×n erro de posição
+%   tau : N×n torques/força aplicada
+
+    n = size(q,2);
+    names = arrayfun(@(i) sprintf('q_%d',i), 1:n, 'UniformOutput',false);
+
+    %% helper para garantir que o vetor de unidades tenha tamanho n
+    unit_arr = @(base) ( length(base)>=n  * base(1:n) ) + ...
+                       ( length(base)< n  * repmat(base(1),1,n) );
+
+    unit_q   = {'[rad]','[rad]','[m]'};      % ajuste se n>3
+    unit_dq  = {'[rad/s]','[rad/s]','[m/s]'};
+    unit_ddq = {'[rad/s^2]','[rad/s^2]','[m/s^2]'};
+
+    %% função interna para empilhar subplots -----------------------
+    function fig_sub(data,data_d,ttl,units)
+        figure('Name',ttl,'NumberTitle','off');
+        for i = 1:n
+            subplot(n,1,i); hold on;
+            plot(t, data(:,i), 'LineWidth',1.4);
+            if ~isempty(data_d)
+                plot(t, data_d(:,i), '--k','LineWidth',0.8);
+                legend({'real','ref'},'Location','best');
+            end
+            grid on;
+            xlabel('Tempo [s]');
+            ylabel(sprintf('%s %s', names{i}, units{i}));
+            if i==1, title(ttl); end
+        end
+    end
+
+    %% gerar as figuras -------------------------------------------
+    fig_sub(q,  qd,  'Posições',       unit_arr(unit_q));
+    fig_sub(dq, dqd, 'Velocidades',    unit_arr(unit_dq));
+    fig_sub(ddq,ddqd,'Acelerações',    unit_arr(unit_ddq));
+    fig_sub(e,  [],  'Erro de posição',unit_arr(unit_q));
+
+    figure('Name','Torques','NumberTitle','off');
+    plot(t, tau, 'LineWidth',1.2);
+    grid on;
+    xlabel('Tempo [s]');
+    ylabel('Torque / Força');
+    title('Torques / força aplicada');
+    legend(names,'Location','best');
+end
+d
